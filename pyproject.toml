@@ -1,0 +1,33 @@
+[project]
+name = "1082-aehnlichkeitsanalyse-module-wirtschaft"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "convertedfox", email = "nicolaibatke@googlemail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
+    "rapidfuzz>=3.14.6",
+    "scikit-learn>=1.9.1",
+    "sentence-transformers>=6.1.0",
+    "torch>=2.14.1",
+    "umap-learn>=0.5.12",
+]
+
+[project.scripts]
+1082-aehnlichkeitsanalyse-module-wirtschaft = "1082_aehnlichkeitsanalyse_module_wirtschaft:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

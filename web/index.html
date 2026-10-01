@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Modullandschaft Wirtschaft</title>
+  <meta name="description" content="Ähnlichkeitsanalyse und Clusterung der Module des Masterprogramms Wirtschaft">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='9' cy='11' r='5' fill='%232a78d6'/%3E%3Ccircle cx='22' cy='9' r='4' fill='%231c5cab'/%3E%3Ccircle cx='17' cy='23' r='6' fill='%230d366b'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Ähnlichkeitsanalyse · Masterprogramm Wirtschaft</p>
+      <h1>Modullandschaft</h1>
+      <p class="lead">
+        Jedes Modul wird mit jedem anderen verglichen – nach <strong>Inhalten</strong>,
+        vermittelten <strong>Kompetenzen</strong> und verwendeter <strong>Literatur</strong>.
+        Ähnliche Module rücken zu Clustern zusammen. Mit dem Regler legen Sie fest,
+        wie viele Cluster entstehen sollen: Je weniger, desto breiter werden sie.
+      </p>
+    </div>
+  </header>
+
+  <section class="controls" aria-label="Einstellungen">
+    <div class="wrap controls-inner">
+      <div class="control control-k">
+        <label for="k-slider" class="control-label">Anzahl Cluster</label>
+        <div class="k-row">
+          <output id="k-value" for="k-slider" class="k-value">—</output>
+          <span class="k-of" id="k-of"></span>
+        </div>
+        <input type="range" id="k-slider" min="1" max="158" step="1" value="90">
+        <div class="k-scale"><span id="k-min"></span><span id="k-max"></span></div>
+      </div>
+      <div class="control control-cap">
+        <span class="control-label" id="cap-label">Max. Module je Cluster</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="cap-label" id="cap-group"></div>
+        <p class="hint" id="cap-hint"></p>
+      </div>
+      <div class="stats" id="stats" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <main class="wrap main">
+    <section class="viz-card" aria-label="Visualisierung">
+      <div class="viz-head">
+        <div class="tabs" role="tablist">
+          <button role="tab" class="tab" id="tab-map" aria-selected="true" data-view="map">Karte</button>
+          <button role="tab" class="tab" id="tab-matrix" aria-selected="false" data-view="matrix">Ähnlichkeitsmatrix</button>
+        </div>
+        <div class="search">
+          <input type="search" id="search" placeholder="Modul suchen …" list="module-list" aria-label="Modul suchen" autocomplete="off">
+          <datalist id="module-list"></datalist>
+        </div>
+      </div>
+      <div class="legend" id="legend" aria-label="Legende"></div>
+      <div class="viz-body">
+        <div id="view-map" class="view">
+          <svg id="map" role="img" aria-label="Karte der Module: nahe Punkte sind ähnliche Module, Linien verbinden Module eines Clusters"></svg>
+          <p class="view-note">Nähe auf der Karte = Ähnlichkeit. Linien verbinden Module desselben Clusters. Scrollen zum Zoomen, Ziehen zum Verschieben.</p>
+        </div>
+        <div id="view-matrix" class="view" hidden>
+          <div class="matrix-wrap"><canvas id="matrix" aria-label="Ähnlichkeitsmatrix aller Modulpaare, sortiert nach Clustern"></canvas></div>
+          <p class="view-note">Jede Zelle ist ein Modulpaar – je dunkler, desto ähnlicher. Umrandete Blöcke auf der Diagonale sind die Cluster.</p>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel" aria-label="Details">
+      <div id="detail"></div>
+    </aside>
+  </main>
+
+  <section class="wrap method" aria-labelledby="method-title">
+    <h2 id="method-title">So wird gerechnet</h2>
+    <div class="method-grid">
+      <div>
+        <h3>1 · Vergleichen</h3>
+        <p>Ein Sprachmodell (bge-m3, lokal ausgeführt) übersetzt Inhalte und Kompetenzbeschreibungen in Bedeutungsvektoren.
+          Verglichen werden ganze Texte, einzelne Stichpunkte und gemeinsame Fachbegriffe. Standardformulierungen wie
+          „Die Studierenden sind in der Lage …“ werden vorher entfernt.</p>
+      </div>
+      <div>
+        <h3>2 · Gewichten</h3>
+        <p>Der Gesamtwert setzt sich zusammen aus <strong>Inhalten (45 %)</strong>, <strong>Kompetenzen (35 %)</strong>
+          und <strong>Literatur (20 %)</strong>. Gemeinsame Literatur wirkt als Bonus – seltene geteilte Werke zählen mehr
+          als verbreitete Standardwerke.</p>
+      </div>
+      <div>
+        <h3>3 · Clustern</h3>
+        <p>Schritt für Schritt werden die beiden ähnlichsten Module bzw. Cluster zusammengeführt (Average Linkage),
+          bis die gewünschte Anzahl erreicht ist. Die Größengrenze verhindert Sammelcluster.</p>
+      </div>
+      <div>
+        <h3>Einordnung</h3>
+        <p>Die Ähnlichkeitsstufe beschreibt, wie ähnlich sich die Module eines Clusters im Mittel sind – gemessen an allen
+          Modulpaaren des Programms. Rahmenmodule (Projekt-, Studien-, Masterarbeiten) sind nicht enthalten.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="wrap footer" id="footer"></footer>
+
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+  <script src="vendor/d3.v7.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
