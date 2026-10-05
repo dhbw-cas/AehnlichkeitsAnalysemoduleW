@@ -16,7 +16,7 @@
     { min: -1, label: "gering", var: "--lvl-1" },
   ];
 
-  const state = { cap: "5", k: 90, view: "map", sel: null, hover: null };
+  const state = { cap: "5", k: 90, view: "map", sel: null, hover: null, fixed: false };
   let clusters = [];      // aktive Cluster
   let clusterOf = [];     // Modulindex → Cluster
   let transform = d3.zoomIdentity;
@@ -28,12 +28,14 @@
 
   // ---------------------------------------------------------------- Einordnung
 
+  // Q: Quantile aller Paarwerte in gleichmäßigen Schritten (z. B. 1001 Werte = 0,1-%-Stufen)
   function percentile(z) {
+    const last = Q.length - 1, step = 100 / last;
     if (z <= Q[0]) return 0;
-    if (z >= Q[100]) return 100;
-    let lo = 0, hi = 100;
+    if (z >= Q[last]) return 100;
+    let lo = 0, hi = last;
     while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (Q[mid] <= z) lo = mid; else hi = mid; }
-    return lo + (z - Q[lo]) / (Q[hi] - Q[lo] || 1);
+    return (lo + (z - Q[lo]) / (Q[hi] - Q[lo] || 1)) * step;
   }
   const levelOf = (pct) => LEVELS.find((l) => pct >= l.min);
   function topShare(pct) {
@@ -79,6 +81,8 @@
       for (const i of mem) clusterOf[i] = c;
     }
     clusters.sort((a, b) => (b.size > 1) - (a.size > 1) || (b.meanZ ?? 0) - (a.meanZ ?? 0));
+    // Fortlaufende Nummer als Bezug für Arbeitsgruppen („Cluster 7“), gleich in Website und Excel-Export
+    clusters.forEach((c, idx) => { c.nr = idx + 1; });
   }
 
   function sharedTerms(mem) {
@@ -324,7 +328,7 @@
   const tip = $("tooltip");
   function tipModule(i) {
     const c = clusterOf[i];
-    const sub = c.size > 1 ? `Cluster „${esc(c.label)}“ · ${c.size} Module · Ähnlichkeit ${c.level.label}` : "Einzelmodul – kein Cluster";
+    const sub = c.size > 1 ? `Cluster ${c.nr} „${esc(c.label)}“ · ${c.size} Module · Ähnlichkeit ${c.level.label}` : "Einzelmodul – kein Cluster";
     return `<strong>${esc(M[i].name)}</strong><div class="tt-sub">${M[i].id} · ${sub}</div>`;
   }
   function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; moveTip(ev); }
@@ -361,8 +365,8 @@
         <p>Sortiert nach Ähnlichkeit. ${singles} Module stehen für sich.</p></div>
       <div class="panel-body">${shown.map((c) => `
         <button class="cluster-card" data-cluster="${c.id}">
-          <div class="cc-top">${dot(c)}<span class="cc-title">${esc(c.label)}</span><span class="cc-count">${c.size} Module</span></div>
-          <div class="cc-members">${c.members.map((m) => esc(M[m].name)).join(" · ")}</div>
+          <div class="cc-top"><span class="cc-nr">${c.nr}</span>${dot(c)}<span class="cc-title">${esc(c.label)}</span><span class="cc-count">${c.size} Module</span></div>
+          <div class="cc-members" style="margin-left:calc(2.2em + 28px)">${c.members.map((m) => esc(M[m].name)).join(" · ")}</div>
         </button>`).join("") || `<p class="muted">Bei dieser Einstellung bleiben alle Module einzeln.</p>`}
         ${multi.length > shown.length ? `<button class="back" id="show-all" style="margin:8px 12px">Alle ${multi.length} Cluster anzeigen</button>` : ""}
       </div>`;
@@ -373,6 +377,16 @@
       el.addEventListener("mouseenter", () => { state.hover = c; highlight(); });
       el.addEventListener("mouseleave", () => { state.hover = null; highlight(); });
     });
+  }
+
+  // Literatur, die mindestens zwei Module eines Clusters teilen
+  function sharedLiterature(mem) {
+    const lit = new Map();
+    for (const i of mem) for (const [key, label] of new Map(M[i].lit)) {
+      if (!lit.has(key)) lit.set(key, { label, n: 0 });
+      lit.get(key).n++;
+    }
+    return [...lit.values()].filter((x) => x.n >= 2).sort((a, b) => b.n - a.n);
   }
 
   function renderCluster(c) {
@@ -391,18 +405,12 @@
     }
     matches.sort((p, q) => q.s - p.s);
 
-    // Literatur, die mindestens zwei Module teilen
-    const lit = new Map();
-    for (const i of mem) for (const [key, label] of new Map(M[i].lit)) {
-      if (!lit.has(key)) lit.set(key, { label, n: 0 });
-      lit.get(key).n++;
-    }
-    const sharedLit = [...lit.values()].filter((x) => x.n >= 2).sort((a, b) => b.n - a.n);
+    const sharedLit = sharedLiterature(mem);
 
     detail.innerHTML = `
       <div class="panel-head">
         <button class="back" id="back">← Alle Cluster</button>
-        <h2>${esc(c.label)}</h2>
+        <h2><span class="nr-badge">Cluster ${c.nr}</span>${esc(c.label)}</h2>
         <p><span class="level-pill">${dot(c)}Ähnlichkeit ${c.level.label}</span>
         &nbsp;${c.size} Module · ähnlicher als ${fmt.format(Math.min(99.9, c.pct))} % aller Modulpaare</p>
       </div>
@@ -451,7 +459,7 @@
       </div>
       <div class="panel-body">
         <div class="section"><h3>Cluster</h3>
-          ${c.size > 1 ? `<button class="linkish" id="to-cluster"><span class="level-pill">${dot(c)}${esc(c.label)} · ${c.size} Module</span></button>`
+          ${c.size > 1 ? `<button class="linkish" id="to-cluster"><span class="level-pill">${dot(c)}Cluster ${c.nr} · ${esc(c.label)} · ${c.size} Module</span></button>`
             : `<span class="muted">Bei ${state.k} Clustern steht dieses Modul für sich.</span>`}
         </div>
         <div class="section"><h3>Ähnlichste Module</h3>
@@ -557,19 +565,140 @@
     renderStats();
     renderDetail();
     drawMap();
-    history.replaceState(null, "", `#k=${state.k}&max=${state.cap}`);
+    history.replaceState(null, "", "#" + hashFor(state.fixed));
+  }
+
+  function hashFor(fixed) {
+    return `k=${state.k}&max=${state.cap}${fixed ? "&ansicht=fest" : ""}`;
   }
 
   function readHash() {
     const p = new URLSearchParams(location.hash.slice(1));
+    state.fixed = p.get("ansicht") === "fest";
     if (p.has("max") && data.meta.caps.map(String).includes(p.get("max"))) state.cap = p.get("max");
     if (p.has("k")) state.k = +p.get("k") || state.k;
+  }
+
+  // ---------------------------------------------------------------- Link teilen & Excel-Export
+
+  function fixedLink() {
+    return `${location.origin}${location.pathname}#${hashFor(true)}`;
+  }
+
+  function setupActions() {
+    const share = $("share-btn");
+    share.addEventListener("click", async () => {
+      const url = fixedLink();
+      const label = share.querySelector("span");
+      try {
+        await navigator.clipboard.writeText(url);
+        label.textContent = "Link kopiert";
+      } catch {
+        prompt("Link zur festen Ansicht:", url);
+      }
+      setTimeout(() => { label.textContent = "Link zur festen Ansicht"; }, 2000);
+    });
+    $("export-btn").addEventListener("click", exportExcel);
+  }
+
+  let xlsxLoading;
+  function loadXlsx() {
+    // SheetJS (~0,9 MB) erst beim ersten Export laden
+    xlsxLoading ??= new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "vendor/xlsx.full.min.js";
+      s.onload = () => resolve(window.XLSX);
+      s.onerror = () => { xlsxLoading = null; reject(new Error("SheetJS konnte nicht geladen werden")); };
+      document.head.appendChild(s);
+    });
+    return xlsxLoading;
+  }
+
+  function sheet(XLSX, rows, widths) {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = widths.map((wch) => ({ wch }));
+    if (rows.length > 1) ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: rows[0].length - 1 } }) };
+    return ws;
+  }
+
+  async function exportExcel() {
+    const btn = $("export-btn");
+    btn.disabled = true;
+    try {
+      const XLSX = await loadXlsx();
+      const capTxt = state.cap === "0" ? "ohne Grenze" : state.cap;
+      const levelTxt = (c) => (c.size > 1 ? c.level.label : "–");
+      const nearestIn = (i, pool) => {
+        const cand = pool.filter((j) => j !== i);
+        if (!cand.length) return "";
+        const j = cand.reduce((a, b) => (SIM[i][b] > SIM[i][a] ? b : a));
+        return `${M[j].name} (${M[j].id}, ${topShare(percentile(SIM[i][j]))})`;
+      };
+      const all = d3.range(N);
+
+      const multi = clusters.filter((c) => c.size > 1);
+      const clusterRows = [["Cluster-Nr.", "Clustername", "Anzahl Module", "Ähnlichkeitsstufe", "Ähnlicher als … % aller Modulpaare",
+        "Gemeinsame Themen", "Modulnummern", "Module", "Gemeinsame Literatur", "Bewertung", "Kommentar"]];
+      for (const c of multi) {
+        clusterRows.push([c.nr, c.label, c.size, levelTxt(c), Math.round(Math.min(99.9, c.pct) * 10) / 10,
+          c.terms.map(([t]) => t).join(", "),
+          c.members.map((i) => M[i].id).join(", "),
+          c.members.map((i) => M[i].name).join("; "),
+          sharedLiterature(c.members).map((x) => `${x.label} (${x.n})`).join("; "),
+          "", ""]);
+      }
+
+      const moduleRows = [["Cluster-Nr.", "Clustername", "Module im Cluster", "Ähnlichkeitsstufe", "Modulnummer", "Modulname",
+        "Modulname (englisch)", "ECTS", "Ähnlichstes Modul im Cluster", "Ähnlichstes Modul insgesamt", "Bewertung", "Kommentar"]];
+      for (const c of clusters) {
+        for (const i of c.members) {
+          moduleRows.push([c.nr, c.size > 1 ? c.label : "Einzelmodul", c.size, levelTxt(c), M[i].id, M[i].name, M[i].name_en || "",
+            M[i].ects ?? "", c.size > 1 ? nearestIn(i, c.members) : "", nearestIn(i, all), "", ""]);
+        }
+      }
+
+      const today = new Date();
+      const infoRows = [
+        ["Modullandschaft – Export"],
+        [],
+        ["Stand", today.toLocaleDateString("de-DE")],
+        ["Anzahl Cluster", state.k],
+        ["Max. Module je Cluster", capTxt],
+        ["Cluster mit mehreren Modulen", multi.length],
+        ["Module ausgewertet", N],
+        ["Link zu diesem Stand", fixedLink()],
+        [],
+        ["Hinweise"],
+        ["Cluster-Nummern gelten nur für diese Einstellung. Bei anderer Clusteranzahl oder Größengrenze ändert sich die Clusterung."],
+        ["Ähnlichkeitsstufe: mittlere Ähnlichkeit der Module eines Clusters, eingeordnet gegenüber allen Modulpaaren (sehr hoch = oberes 1 %, hoch = obere 4 %, mittel = obere 10 %)."],
+        ["Gewichtung: Inhalte 45 %, Kompetenzen 35 %, Literatur 20 %."],
+        [`Nicht enthalten (Rahmenmodule): ${data.meta.excluded.join(", ")}`],
+        ["Die Spalten „Bewertung“ und „Kommentar“ sind frei auszufüllen."],
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, sheet(XLSX, clusterRows, [10, 40, 12, 16, 16, 40, 30, 70, 50, 18, 40]), "Cluster");
+      XLSX.utils.book_append_sheet(wb, sheet(XLSX, moduleRows, [10, 36, 12, 16, 12, 50, 44, 6, 50, 50, 18, 40]), "Module");
+      const info = XLSX.utils.aoa_to_sheet(infoRows);
+      info["!cols"] = [{ wch: 30 }, { wch: 90 }];
+      XLSX.utils.book_append_sheet(wb, info, "Hinweise");
+
+      const stamp = today.toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `Modullandschaft_${state.k}-Cluster_max-${state.cap === "0" ? "ohne" : state.cap}_${stamp}.xlsx`);
+    } catch (err) {
+      alert("Export fehlgeschlagen: " + err.message);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // ---------------------------------------------------------------- Start
 
   readHash();
+  document.body.classList.toggle("fixed", state.fixed);
+  $("cap-value").textContent = state.cap === "0" ? "∞" : state.cap;
   setupControls();
+  setupActions();
   updateSliderRange();
   sizeMap();
   update(true);

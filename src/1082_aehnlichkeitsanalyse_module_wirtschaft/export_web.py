@@ -254,7 +254,7 @@ def export() -> dict:
             "caps": CAPS,
             "weights": {"inhalte": 0.45, "kompetenzen": 0.35, "literatur": 0.20},
             # Verteilung aller Paarwerte → Einordnung „gehört zu den ähnlichsten x %“
-            "quantiles": [round(float(q), 3) for q in np.quantile(total[iu], np.linspace(0, 1, 101))],
+            "quantiles": [round(float(q), 3) for q in np.quantile(total[iu], np.linspace(0, 1, 1001))],
         },
         "modules": mod_out,
         "sim": rounded(total),

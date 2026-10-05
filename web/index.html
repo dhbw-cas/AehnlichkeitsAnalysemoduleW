@@ -16,8 +16,9 @@
       <p class="lead">
         Jedes Modul wird mit jedem anderen verglichen – nach <strong>Inhalten</strong>,
         vermittelten <strong>Kompetenzen</strong> und verwendeter <strong>Literatur</strong>.
-        Ähnliche Module rücken zu Clustern zusammen. Mit dem Regler legen Sie fest,
-        wie viele Cluster entstehen sollen: Je weniger, desto breiter werden sie.
+        Ähnliche Module rücken zu Clustern zusammen.
+        <span class="edit-only">Mit dem Regler legen Sie fest,
+        wie viele Cluster entstehen sollen: Je weniger, desto breiter werden sie.</span>
       </p>
     </div>
   </header>
@@ -30,13 +31,25 @@
           <output id="k-value" for="k-slider" class="k-value">—</output>
           <span class="k-of" id="k-of"></span>
         </div>
-        <input type="range" id="k-slider" min="1" max="158" step="1" value="90">
-        <div class="k-scale"><span id="k-min"></span><span id="k-max"></span></div>
+        <input type="range" id="k-slider" class="edit-only" min="1" max="158" step="1" value="90">
+        <p class="hint fixed-only" id="fixed-note">Fester Arbeitsstand – alle sehen dieselbe Clusterung.</p>
+        <div class="k-scale edit-only"><span id="k-min"></span><span id="k-max"></span></div>
       </div>
       <div class="control control-cap">
         <span class="control-label" id="cap-label">Max. Module je Cluster</span>
-        <div class="segmented" role="radiogroup" aria-labelledby="cap-label" id="cap-group"></div>
-        <p class="hint" id="cap-hint"></p>
+        <output id="cap-value" class="k-value fixed-only" aria-labelledby="cap-label"></output>
+        <div class="segmented edit-only" role="radiogroup" aria-labelledby="cap-label" id="cap-group"></div>
+        <p class="hint edit-only" id="cap-hint"></p>
+        <div class="actions">
+          <button type="button" class="btn" id="export-btn">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0L5 7m3 3 3-3M3 12.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Excel-Export
+          </button>
+          <button type="button" class="btn btn-ghost edit-only" id="share-btn" title="Link auf diesen Stand ohne Regler kopieren">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 9.5 9.5 6.5M7 4.5l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7L10.7 8.2M9 11.5l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7L5.3 7.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span>Link zur festen Ansicht</span>
+          </button>
+        </div>
       </div>
       <div class="stats" id="stats" aria-live="polite"></div>
     </div>
