@@ -36,6 +36,24 @@ RAHMENMODULE = {
     "W3M50009", "W3M50010",  # Studienarbeit, Masterarbeit
 }
 
+# Studiengang nach Präfix der Modulnummer (längstes passendes Präfix gewinnt); Namen wie auf cas.dhbw.de
+STUDIENGAENGE = {
+    "W3M101": ("ACT", "Accounting, Controlling, Taxation"),
+    "W3M113": ("DBM", "Digital Business Management"),
+    "W3M5": ("DSAI", "Data Science and Artificial Intelligence"),
+    "W3M114": ("ENT", "Entrepreneurship"),
+    "W3M104": ("FIN", "Finance"),
+    "W3M102": ("GBM", "General Business Management"),
+    "W3M107": ("MKT", "Marketing and Business Psychology"),
+    "W3M4": ("MBA", "Master of Business Administration"),
+    "W3M108": ("MDB", "Media and Data-driven Business"),
+    "W3M109": ("PMW", "Personalmanagement und Wirtschaftspsychologie"),
+    "W3M112": ("SAL", "Sales and Negotiation"),
+    "W3M110": ("SLP", "Supply Chain Management, Logistics, Production"),
+    "W3M2": ("WI", "Wirtschaftsinformatik"),
+}
+STUDIENGANG_SONST = ("ÜG", "Studiengangsübergreifend")
+
 CAPS = [3, 4, 5, 6, 8, 0]  # 0 = ohne Grenze
 EVIDENCE_MIN_Z = 1.0
 TOP_TERMS = 25
@@ -63,6 +81,11 @@ def load_matrix(name: str, ids: list[str]) -> np.ndarray:
     m = pd.read_csv(SIM_DIR / f"matrix_{name}.csv", index_col=0)
     m.index = m.index.astype(str)
     return m.loc[ids, ids].to_numpy(dtype=float)
+
+
+def studiengang(modulnummer: str) -> tuple[str, str]:
+    prefixes = [p for p in STUDIENGAENGE if modulnummer.startswith(p)]
+    return STUDIENGAENGE[max(prefixes, key=len)] if prefixes else STUDIENGANG_SONST
 
 
 def capped_average_linkage(sim: np.ndarray, cap: int) -> list[list]:
@@ -219,6 +242,7 @@ def export() -> dict:
             "id": r["modulnummer"],
             "name": r["modulname"],
             "name_en": r["modulname_en"],
+            "sg": studiengang(r["modulnummer"])[0],
             "ects": int(float(r["ects"])) if r["ects"] else None,
             "x": round(float(xy[i, 0]), 4),
             "y": round(float(xy[i, 1]), 4),
@@ -252,6 +276,7 @@ def export() -> dict:
             "n_total": n + len(RAHMENMODULE),
             "excluded": sorted(RAHMENMODULE),
             "caps": CAPS,
+            "studiengaenge": dict(sorted(set(STUDIENGAENGE.values()) | {STUDIENGANG_SONST})),
             "weights": {"inhalte": 0.45, "kompetenzen": 0.35, "literatur": 0.20},
             # Verteilung aller Paarwerte → Einordnung „gehört zu den ähnlichsten x %“
             "quantiles": [round(float(q), 3) for q in np.quantile(total[iu], np.linspace(0, 1, 1001))],

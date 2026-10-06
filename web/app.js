@@ -8,6 +8,7 @@
   const SIM = data.sim;
   const DIMS = data.dims;
   const Q = data.meta.quantiles;
+  const SG = data.meta.studiengaenge;   // Kürzel → Name des Studiengangs
 
   const LEVELS = [
     { min: 99, label: "sehr hoch", var: "--lvl-4" },
@@ -46,6 +47,13 @@
   const dimWord = (z) => (z == null ? "–" : z >= 2 ? "sehr ähnlich" : z >= 1 ? "ähnlich" : z >= 0 ? "etwas ähnlich" : "kaum ähnlich");
   const clip = (s, n = 200) => (s.length > n ? s.slice(0, s.lastIndexOf(" ", n - 2) > n * 0.6 ? s.lastIndexOf(" ", n - 2) : n - 2) + " …" : s);
   const pairKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+  const sgName = (i) => SG[M[i].sg] || M[i].sg;
+  const sgTag = (i) => `<span class="sg-tag" title="${esc(sgName(i))}">${esc(M[i].sg)}</span>`;
+  // Studiengänge eines Clusters mit Anzahl, häufigster zuerst: „ACT (2), FIN“
+  function sgMix(mem) {
+    const n = d3.rollups(mem, (v) => v.length, (i) => M[i].sg).sort((a, b) => b[1] - a[1]);
+    return n.map(([sg, k]) => (k > 1 ? `${sg} (${k})` : sg)).join(", ");
+  }
 
   // ---------------------------------------------------------------- Clusterung
 
@@ -311,7 +319,7 @@
     const [a, b] = hit;
     if (a === b) return showTip(ev, tipModule(a));
     const pct = percentile(SIM[a][b]);
-    showTip(ev, `<strong>${esc(M[a].name)}</strong><br><strong>${esc(M[b].name)}</strong>
+    showTip(ev, `<strong>${esc(M[a].name)}</strong> ${sgTag(a)}<br><strong>${esc(M[b].name)}</strong> ${sgTag(b)}
       <div class="tt-sub">Ähnlichkeit: ${topShare(pct)} aller Paare${clusterOf[a] === clusterOf[b] ? " · gleiches Cluster" : ""}</div>`);
   });
   canvas.addEventListener("mouseleave", hideTip);
@@ -329,7 +337,7 @@
   function tipModule(i) {
     const c = clusterOf[i];
     const sub = c.size > 1 ? `Cluster ${c.nr} „${esc(c.label)}“ · ${c.size} Module · Ähnlichkeit ${c.level.label}` : "Einzelmodul – kein Cluster";
-    return `<strong>${esc(M[i].name)}</strong><div class="tt-sub">${M[i].id} · ${sub}</div>`;
+    return `<strong>${esc(M[i].name)}</strong><div class="tt-sub">${M[i].id} · ${esc(sgName(i))}<br>${sub}</div>`;
   }
   function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; moveTip(ev); }
   function moveTip(ev) {
@@ -366,7 +374,7 @@
       <div class="panel-body">${shown.map((c) => `
         <button class="cluster-card" data-cluster="${c.id}">
           <div class="cc-top"><span class="cc-nr">${c.nr}</span>${dot(c)}<span class="cc-title">${esc(c.label)}</span><span class="cc-count">${c.size} Module</span></div>
-          <div class="cc-members" style="margin-left:calc(2.2em + 28px)">${c.members.map((m) => esc(M[m].name)).join(" · ")}</div>
+          <div class="cc-members" style="margin-left:calc(2.2em + 28px)">${c.members.map((m) => `${esc(M[m].name)} <span class="sg-inline">${esc(M[m].sg)}</span>`).join(" · ")}</div>
         </button>`).join("") || `<p class="muted">Bei dieser Einstellung bleiben alle Module einzeln.</p>`}
         ${multi.length > shown.length ? `<button class="back" id="show-all" style="margin:8px 12px">Alle ${multi.length} Cluster anzeigen</button>` : ""}
       </div>`;
@@ -413,18 +421,19 @@
         <h2><span class="nr-badge">Cluster ${c.nr}</span>${esc(c.label)}</h2>
         <p><span class="level-pill">${dot(c)}Ähnlichkeit ${c.level.label}</span>
         &nbsp;${c.size} Module · ähnlicher als ${fmt.format(Math.min(99.9, c.pct))} % aller Modulpaare</p>
+        <p>Studiengänge: ${esc(sgMix(mem))}</p>
       </div>
       <div class="panel-body">
         ${c.terms.length ? `<div class="section"><h3>Gemeinsame Themen</h3><div class="chips">${c.terms.map(([t, n]) => `<span class="chip">${esc(t)}</span>`).join("")}</div></div>` : ""}
         <div class="section"><h3>Module</h3>
           ${mem.map((i) => `<div class="member"><span class="member-id">${M[i].id}</span>
-            <button class="linkish" data-module="${i}">${esc(M[i].name)}</button></div>`).join("")}
+            <button class="linkish" data-module="${i}">${esc(M[i].name)}</button>${sgTag(i)}</div>`).join("")}
         </div>
         ${matches.length ? `<div class="section"><h3>Was sie verbindet</h3>
           ${matches.slice(0, 5).map((m) => `<div class="match"><div class="match-pair">
-            <div><div class="match-src">${esc(M[m.a].name)}</div>${esc(clip(m.ta))}</div>
+            <div><div class="match-src">${esc(M[m.a].name)} · ${esc(M[m.a].sg)}</div>${esc(clip(m.ta))}</div>
             <div class="match-arrow">⟷</div>
-            <div><div class="match-src">${esc(M[m.b].name)}</div>${esc(clip(m.tb))}</div></div></div>`).join("")}</div>` : ""}
+            <div><div class="match-src">${esc(M[m.b].name)} · ${esc(M[m.b].sg)}</div>${esc(clip(m.tb))}</div></div></div>`).join("")}</div>` : ""}
         ${sharedLit.length ? `<div class="section"><h3>Gemeinsame Literatur</h3><ul class="lit-list">
           ${sharedLit.slice(0, 8).map((x) => `<li>${esc(x.label)} <span class="muted">(${x.n} Module)</span></li>`).join("")}</ul></div>` : ""}
         <div class="section"><h3>Paarweise Ähnlichkeit</h3>
@@ -455,6 +464,7 @@
       <div class="panel-head">
         <button class="back" id="back">← ${c.size > 1 ? "Zum Cluster" : "Alle Cluster"}</button>
         <h2>${esc(m.name)}</h2>
+        <p class="sg-line">${sgTag(i)}${esc(sgName(i))}</p>
         <p>${m.id}${m.ects ? ` · ${m.ects} ECTS` : ""}${m.name_en && m.name_en !== m.name ? ` · <em>${esc(m.name_en)}</em>` : ""}</p>
       </div>
       <div class="panel-body">
@@ -463,7 +473,7 @@
             : `<span class="muted">Bei ${state.k} Clustern steht dieses Modul für sich.</span>`}
         </div>
         <div class="section"><h3>Ähnlichste Module</h3>
-          ${nearest.map((j) => simRow(i, j, esc(M[j].name), true)).join("")}
+          ${nearest.map((j) => simRow(i, j, `${esc(M[j].name)} <span class="sg-inline">${esc(M[j].sg)}</span>`, true)).join("")}
         </div>
         ${m.terms.length ? `<div class="section"><h3>Prägende Fachbegriffe</h3><div class="chips">${m.terms.slice(0, 12).map(([, , d]) => `<span class="chip">${esc(d)}</span>`).join("")}</div></div>` : ""}
         <div class="section"><h3>Inhalte</h3><ul class="points-list">${m.points.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>
@@ -524,7 +534,7 @@
     }));
     slider.addEventListener("input", () => { state.k = +slider.value; update(false); });
     document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setView(t.dataset.view)));
-    $("module-list").innerHTML = M.map((m) => `<option value="${esc(m.name)} · ${m.id}">`).join("");
+    $("module-list").innerHTML = M.map((m) => `<option value="${esc(m.name)} · ${m.id}" label="${esc(m.name)} · ${m.id} · ${esc(SG[m.sg] || m.sg)}">`).join("");
     $("search").addEventListener("change", (ev) => {
       const v = ev.target.value.toLowerCase();
       const i = M.findIndex((m) => `${m.name} · ${m.id}`.toLowerCase() === v || m.id.toLowerCase() === v || m.name.toLowerCase() === v);
@@ -632,28 +642,29 @@
         const cand = pool.filter((j) => j !== i);
         if (!cand.length) return "";
         const j = cand.reduce((a, b) => (SIM[i][b] > SIM[i][a] ? b : a));
-        return `${M[j].name} (${M[j].id}, ${topShare(percentile(SIM[i][j]))})`;
+        return `${M[j].name} (${M[j].id}, ${M[j].sg}, ${topShare(percentile(SIM[i][j]))})`;
       };
       const all = d3.range(N);
 
       const multi = clusters.filter((c) => c.size > 1);
       const clusterRows = [["Cluster-Nr.", "Clustername", "Anzahl Module", "Ähnlichkeitsstufe", "Ähnlicher als … % aller Modulpaare",
-        "Gemeinsame Themen", "Modulnummern", "Module", "Gemeinsame Literatur", "Bewertung", "Kommentar"]];
+        "Gemeinsame Themen", "Studiengänge", "Modulnummern", "Module", "Gemeinsame Literatur", "Bewertung", "Kommentar"]];
       for (const c of multi) {
         clusterRows.push([c.nr, c.label, c.size, levelTxt(c), Math.round(Math.min(99.9, c.pct) * 10) / 10,
           c.terms.map(([t]) => t).join(", "),
+          sgMix(c.members),
           c.members.map((i) => M[i].id).join(", "),
-          c.members.map((i) => M[i].name).join("; "),
+          c.members.map((i) => `${M[i].name} (${M[i].sg})`).join("; "),
           sharedLiterature(c.members).map((x) => `${x.label} (${x.n})`).join("; "),
           "", ""]);
       }
 
       const moduleRows = [["Cluster-Nr.", "Clustername", "Module im Cluster", "Ähnlichkeitsstufe", "Modulnummer", "Modulname",
-        "Modulname (englisch)", "ECTS", "Ähnlichstes Modul im Cluster", "Ähnlichstes Modul insgesamt", "Bewertung", "Kommentar"]];
+        "Modulname (englisch)", "Studiengang (Kürzel)", "Studiengang", "ECTS", "Ähnlichstes Modul im Cluster", "Ähnlichstes Modul insgesamt", "Bewertung", "Kommentar"]];
       for (const c of clusters) {
         for (const i of c.members) {
           moduleRows.push([c.nr, c.size > 1 ? c.label : "Einzelmodul", c.size, levelTxt(c), M[i].id, M[i].name, M[i].name_en || "",
-            M[i].ects ?? "", c.size > 1 ? nearestIn(i, c.members) : "", nearestIn(i, all), "", ""]);
+            M[i].sg, sgName(i), M[i].ects ?? "", c.size > 1 ? nearestIn(i, c.members) : "", nearestIn(i, all), "", ""]);
         }
       }
 
@@ -672,13 +683,14 @@
         ["Cluster-Nummern gelten nur für diese Einstellung. Bei anderer Clusteranzahl oder Größengrenze ändert sich die Clusterung."],
         ["Ähnlichkeitsstufe: mittlere Ähnlichkeit der Module eines Clusters, eingeordnet gegenüber allen Modulpaaren (sehr hoch = oberes 1 %, hoch = obere 4 %, mittel = obere 10 %)."],
         ["Gewichtung: Inhalte 45 %, Kompetenzen 35 %, Literatur 20 %."],
+        [`Studiengänge: ${Object.entries(SG).map(([k, v]) => `${k} = ${v}`).join("; ")}`],
         [`Nicht enthalten (Rahmenmodule): ${data.meta.excluded.join(", ")}`],
         ["Die Spalten „Bewertung“ und „Kommentar“ sind frei auszufüllen."],
       ];
 
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, sheet(XLSX, clusterRows, [10, 40, 12, 16, 16, 40, 30, 70, 50, 18, 40]), "Cluster");
-      XLSX.utils.book_append_sheet(wb, sheet(XLSX, moduleRows, [10, 36, 12, 16, 12, 50, 44, 6, 50, 50, 18, 40]), "Module");
+      XLSX.utils.book_append_sheet(wb, sheet(XLSX, clusterRows, [10, 40, 12, 16, 16, 40, 24, 30, 70, 50, 18, 40]), "Cluster");
+      XLSX.utils.book_append_sheet(wb, sheet(XLSX, moduleRows, [10, 36, 12, 16, 12, 50, 44, 10, 36, 6, 50, 50, 18, 40]), "Module");
       const info = XLSX.utils.aoa_to_sheet(infoRows);
       info["!cols"] = [{ wch: 30 }, { wch: 90 }];
       XLSX.utils.book_append_sheet(wb, info, "Hinweise");

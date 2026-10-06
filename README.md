@@ -12,7 +12,8 @@ uv run python -m 1082_aehnlichkeitsanalyse_module_wirtschaft.export_web   # → 
 ```
 
 Gewichte und Parameter stehen oben in `similarity.py` (`WEIGHTS`, `CONTENT_MIX`, `LIT_SCALE`);
-ausgeblendete Rahmenmodule und Größengrenzen in `export_web.py` (`RAHMENMODULE`, `CAPS`).
+ausgeblendete Rahmenmodule, Größengrenzen und die Zuordnung Modulnummer → Studiengang in `export_web.py`
+(`RAHMENMODULE`, `CAPS`, `STUDIENGAENGE`).
 
 ## Website lokal ansehen
 
