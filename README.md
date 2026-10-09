@@ -9,7 +9,14 @@ und zeigt die Clusterung als interaktive Website („Modullandschaft“).
 uv run python -m 1082_aehnlichkeitsanalyse_module_wirtschaft.preprocess   # data/module.csv → data/aufbereitet/
 uv run python -m 1082_aehnlichkeitsanalyse_module_wirtschaft.similarity   # → data/aehnlichkeit/ (erster Lauf ~10 min, danach Cache)
 uv run python -m 1082_aehnlichkeitsanalyse_module_wirtschaft.export_web   # → web/data/data.json
+uv run python -m 1082_aehnlichkeitsanalyse_module_wirtschaft.auslastung   # data/*Modulauslastung*.xlsx → web/data/auslastung.json
 ```
+
+Die Modulauslastung kommt aus der neuesten `data/*Modulauslastung*.xlsx` (Blatt „Datenbasis“). Auf der Karte
+bestimmt sie die Punktgröße (Ø Teilnehmende pro Studienjahr über `STUDIENJAHRE` in `auslastung.py`, alle
+Durchführungen eines Moduls addiert, Absagen „X“ = 0); je Cluster wird summiert. Fehlt `auslastung.json`,
+läuft die Website ohne Auslastung weiter. Für eine neue Auswertung nur die neue Excel-Datei nach `data/`
+legen und den letzten Schritt erneut ausführen.
 
 Gewichte und Parameter stehen oben in `similarity.py` (`WEIGHTS`, `CONTENT_MIX`, `LIT_SCALE`);
 ausgeblendete Rahmenmodule, Größengrenzen und die Zuordnung Modulnummer → Studiengang in `export_web.py`

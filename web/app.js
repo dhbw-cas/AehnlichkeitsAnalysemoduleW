@@ -10,6 +10,8 @@
   const DIMS = data.dims;
   let Q = data.meta.quantiles;
   const SG = data.meta.studiengaenge;   // Kürzel → Name des Studiengangs
+  // Modulauslastung (eigene, optionale Datei): ohne sie bleibt die Punktgröße einheitlich
+  const TN = await fetch("data/auslastung.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
 
   const LEVELS = [
     { min: 99, label: "sehr hoch", var: "--lvl-4" },
@@ -64,6 +66,25 @@
     const n = d3.rollups(mem, (v) => v.length, (i) => M[i].sg).sort((a, b) => b[1] - a[1]);
     return n.map(([sg, k]) => (k > 1 ? `${sg} (${k})` : sg)).join(", ");
   }
+
+  // ---------------------------------------------------------------- Auslastung
+
+  const tnOf = (i) => TN?.module[M[i].id] ?? null;
+  const fmtInt = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 });
+  const TN_YEARS = TN ? `Ø ${TN.meta.studienjahre[0]}–${TN.meta.studienjahre.at(-1)}` : "";
+  // Teilnehmende pro Jahr eines Clusters; Module ohne Daten zählen nicht mit
+  const tnSum = (mem) => d3.sum(mem, (i) => tnOf(i)?.jahr ?? 0);
+  const tnMissing = (mem) => mem.filter((i) => !tnOf(i)).length;
+  function tnLabel(mem) {
+    if (!TN) return "";
+    const miss = tnMissing(mem);
+    if (miss === mem.length) return "keine Auslastungsdaten";
+    return `${fmtInt.format(tnSum(mem))} Teilnehmende/Jahr${miss ? ` (ohne ${miss} Modul${miss > 1 ? "e" : ""} ohne Daten)` : ""}`;
+  }
+  // Punktfläche proportional zu den Teilnehmenden pro Jahr
+  const rScale = d3.scaleSqrt().domain([0, d3.max(Object.values(TN?.module ?? {}), (t) => t.jahr) || 1]).range([3, 15]);
+  let dotScale = 1;   // auf schmalen Karten kleinere Punkte (setzt sizeMap)
+  const radius = (i) => dotScale * (!TN ? (clusterOf[i].size > 1 ? 6 : 4.5) : tnOf(i) ? rScale(tnOf(i).jahr) : 4);
 
   // ---------------------------------------------------------------- Gewichtung
 
@@ -256,7 +277,7 @@
   const sim = d3.forceSimulation(nodes)
     .force("x", d3.forceX((d) => d.bx).strength(0.05))
     .force("y", d3.forceY((d) => d.by).strength(0.05))
-    .force("collide", d3.forceCollide(11))
+    .force("collide", d3.forceCollide(11))   // Radius je Punkt setzt relayout()
     .force("link", d3.forceLink([]).distance(22).strength(0.8))
     .alphaDecay(0.035)
     .stop();
@@ -266,6 +287,7 @@
   function relayout() {
     const links = clusters.flatMap((c) => c.edges.map(([a, b]) => ({ source: a, target: b })));
     sim.force("link").links(links);
+    sim.force("collide").radius((d) => radius(d.i) + 5);
     if (firstLayout) {
       // Erster Aufbau ohne Animation
       sim.alpha(1);
@@ -279,6 +301,7 @@
 
   function sizeMap() {
     const w = svg.node().clientWidth, h = svg.node().clientHeight, pad = 40;
+    dotScale = Math.max(0.5, Math.min(1, w / 800));
     const ext = (k) => d3.extent(nodes, (d) => d[k]);
     const [x0, x1] = ext("bx"), [y0, y1] = ext("by");
     xS = d3.scaleLinear().domain([x0 - 30, x1 + 30]).range([pad, w - pad]);
@@ -310,7 +333,7 @@
     )
       .attr("class", (d, i) => "pt" + (clusterOf[i].size > 1 ? "" : " single"))
       .transition().duration(300)
-      .attr("r", (d, i) => (clusterOf[i].size > 1 ? 6 : 4.5))
+      .attr("r", (d, i) => radius(i))
       .attr("fill", (d, i) => colorOf(clusterOf[i]));
 
     const edges = clusters.flatMap((c) => c.edges.map(([a, b]) => ({ a, b, c, key: pairKey(a, b) })));
@@ -336,7 +359,7 @@
     // Beschriftungen senkrecht auseinanderschieben, wenn sie sich überdecken würden
     const labels = gLabels.selectAll("text").nodes().map((el) => {
       const i = d3.select(el).datum();
-      return { el, x: px(i) + 9, y: py(i) + 4, w: Math.min(260, el.getComputedTextLength?.() || 160) };
+      return { el, x: px(i) + radius(i) + 4, y: py(i) + 4, w: Math.min(260, el.getComputedTextLength?.() || 160) };
     }).sort((a, b) => a.y - b.y);
     for (let pass = 0; pass < 4; pass++) {
       for (let a = 0; a < labels.length; a++) for (let b = a + 1; b < labels.length; b++) {
@@ -444,7 +467,10 @@
   function tipModule(i) {
     const c = clusterOf[i];
     const sub = c.size > 1 ? `Cluster ${c.nr} „${esc(c.label)}“ · ${c.size} Module · Ähnlichkeit ${c.level.label}` : "Einzelmodul – kein Cluster";
-    return `<strong>${esc(M[i].name)}</strong><div class="tt-sub">${M[i].id} · ${esc(sgName(i))}<br>${sub}</div>`;
+    const t = tnOf(i);
+    const tn = !TN ? "" : `<br>${t ? `${fmtInt.format(t.jahr)} Teilnehmende/Jahr (${TN_YEARS})` : "keine Auslastungsdaten"}`;
+    const ctn = TN && c.size > 1 ? ` · ${tnLabel(c.members)}` : "";
+    return `<strong>${esc(M[i].name)}</strong><div class="tt-sub">${M[i].id} · ${esc(sgName(i))}${tn}<br>${sub}${ctn}</div>`;
   }
   function showTip(ev, html) { tip.innerHTML = html; tip.hidden = false; moveTip(ev); }
   function moveTip(ev) {
@@ -480,7 +506,7 @@
         <p>Sortiert nach Ähnlichkeit. ${singles} Module stehen für sich.</p></div>
       <div class="panel-body">${shown.map((c) => `
         <button class="cluster-card" data-cluster="${c.id}">
-          <div class="cc-top"><span class="cc-nr">${c.nr}</span>${dot(c)}<span class="cc-title">${esc(c.label)}</span><span class="cc-count">${c.size} Module</span></div>
+          <div class="cc-top"><span class="cc-nr">${c.nr}</span>${dot(c)}<span class="cc-title">${esc(c.label)}</span><span class="cc-count">${c.size} Module${TN ? `<br>${fmtInt.format(tnSum(c.members))} TN/Jahr` : ""}</span></div>
           <div class="cc-members" style="margin-left:calc(2.2em + 28px)">${c.members.map((m) => `${esc(M[m].name)} <span class="sg-inline">${esc(M[m].sg)}</span>`).join(" · ")}</div>
         </button>`).join("") || `<p class="muted">Bei dieser Einstellung bleiben alle Module einzeln.</p>`}
         ${multi.length > shown.length ? `<button class="back" id="show-all" style="margin:8px 12px">Alle ${multi.length} Cluster anzeigen</button>` : ""}
@@ -529,12 +555,13 @@
         <p><span class="level-pill">${dot(c)}Ähnlichkeit ${c.level.label}</span>
         &nbsp;${c.size} Module · ähnlicher als ${fmt.format(Math.min(99.9, c.pct))} % aller Modulpaare</p>
         <p>Studiengänge: ${esc(sgMix(mem))}</p>
+        ${TN ? `<p>Teilnehmende: <strong>${esc(tnLabel(mem))}</strong> <span class="muted">(${TN_YEARS})</span></p>` : ""}
       </div>
       <div class="panel-body">
         ${c.terms.length ? `<div class="section"><h3>Gemeinsame Themen</h3><div class="chips">${c.terms.map(([t, n]) => `<span class="chip">${esc(t)}</span>`).join("")}</div></div>` : ""}
         <div class="section"><h3>Module</h3>
           ${mem.map((i) => `<div class="member"><span class="member-id">${M[i].id}</span>
-            <button class="linkish" data-module="${i}">${esc(M[i].name)}</button>${sgTag(i)}</div>`).join("")}
+            <button class="linkish" data-module="${i}">${esc(M[i].name)}</button>${sgTag(i)}${TN ? `<span class="member-tn" title="Teilnehmende pro Jahr (${TN_YEARS})">${tnOf(i) ? fmtInt.format(tnOf(i).jahr) : "–"}</span>` : ""}</div>`).join("")}
         </div>
         ${matches.length ? `<div class="section"><h3>Was sie verbindet</h3>
           ${matches.slice(0, 5).map((m) => `<div class="match"><div class="match-pair">
@@ -579,6 +606,7 @@
           ${c.size > 1 ? `<button class="linkish" id="to-cluster"><span class="level-pill">${dot(c)}Cluster ${c.nr} · ${esc(c.label)} · ${c.size} Module</span></button>`
             : `<span class="muted">Bei ${state.k} Clustern steht dieses Modul für sich.</span>`}
         </div>
+        ${TN ? tnSection(i) : ""}
         <div class="section"><h3>Ähnlichste Module</h3>
           ${nearest.map((j) => simRow(i, j, `${esc(M[j].name)} <span class="sg-inline">${esc(M[j].sg)}</span>`, true)).join("")}
         </div>
@@ -589,6 +617,18 @@
     $("back").addEventListener("click", () => select(c.size > 1 ? { type: "cluster", c } : null));
     $("to-cluster")?.addEventListener("click", () => select({ type: "cluster", c }));
     bindModuleLinks();
+  }
+
+  function tnSection(i) {
+    const t = tnOf(i);
+    if (!t) return `<div class="section"><h3>Auslastung</h3><p class="muted">Keine Auslastungsdaten für dieses Modul.</p></div>`;
+    const years = TN.meta.studienjahre.map((y, k) => `<div class="tn-year"><span>${y}</span><strong>${fmtInt.format(t.jahre[k])}</strong></div>`).join("");
+    const quote = t.quote != null ? ` · Auslastung <strong>${fmtInt.format(t.quote * 100)} %</strong> von max. ${t.max}` : "";
+    return `<div class="section"><h3>Auslastung</h3>
+      <p><strong>${fmtInt.format(t.jahr)}</strong> Teilnehmende pro Jahr <span class="muted">(${TN_YEARS})</span></p>
+      <div class="tn-years">${years}</div>
+      <p class="muted">${t.durchf ? `${t.durchf} Durchführung${t.durchf > 1 ? "en" : ""}, Ø ${fmt.format(t.je_durchf)} Teilnehmende${quote}` : "Im Zeitraum nicht durchgeführt"}${t.abgesagt ? ` · ${t.abgesagt}× abgesagt` : ""}</p>
+    </div>`;
   }
 
   function bindModuleLinks() {
@@ -621,7 +661,11 @@
     if (state.view === "map") {
       el.innerHTML = `<span class="legend-title">Ähnlichkeit im Cluster</span>` +
         [...LEVELS].reverse().map((l) => `<span class="legend-item"><span class="swatch" style="background:${css(l.var)}"></span>${l.label}</span>`).join("") +
-        `<span class="legend-item"><span class="swatch" style="background:${css("--single")}"></span>Einzelmodul</span>`;
+        `<span class="legend-item"><span class="swatch" style="background:${css("--single")}"></span>Einzelmodul</span>` +
+        (TN ? `<span class="legend-group"><span class="legend-title">Punktgröße</span>${[10, 50, 150].map((v) => {
+          const r = rScale(v) * dotScale;   // wie auf der Karte
+          return `<span class="legend-item"><svg width="${2 * r + 2}" height="${2 * r + 2}" aria-hidden="true"><circle cx="${r + 1}" cy="${r + 1}" r="${r}" fill="none" stroke="${css("--ink-2")}"/></svg>${v}</span>`;
+        }).join("")}<span>Teilnehmende/Jahr</span></span>` : "");
     } else {
       el.innerHTML = `<span class="legend-title">Ähnlichkeit des Paares</span>
         <span class="legend-item">gering <span style="display:inline-block;width:120px;height:10px;border-radius:5px;border:1px solid var(--border);background:linear-gradient(90deg,${css("--surface")},${css("--heat-hi")})"></span> hoch</span>
@@ -668,7 +712,8 @@
     $("w-reset").hidden = def;
     $("w-hint").textContent = def ? "Standardgewichtung" : "Eigene Gewichtung – Cluster neu berechnet.";
     $("w-fixed").textContent = weightsText(state.w);
-    $("footer").textContent = `${N} Module ausgewertet · ${data.meta.excluded.length} Rahmenmodule ausgeblendet · Gewichtung: ${weightsText(state.w)}`;
+    $("footer").textContent = `${N} Module ausgewertet · ${data.meta.excluded.length} Rahmenmodule ausgeblendet · Gewichtung: ${weightsText(state.w)}` +
+      (TN ? ` · Auslastung: Stand ${TN.meta.stand ?? TN.meta.quelle}, ${TN_YEARS}` : "");
   }
 
   function applyWeights() {
@@ -787,12 +832,19 @@
         return `${M[j].name} (${M[j].id}, ${M[j].sg}, ${topShare(percentile(SIM[i][j]))})`;
       };
       const all = d3.range(N);
+      const tnCols = (i) => {
+        if (!TN) return [];
+        const t = tnOf(i);
+        if (!t) return ["", ...TN.meta.studienjahre.map(() => ""), "", "", "", ""];
+        return [tnCell(t.jahr), ...t.jahre, t.durchf, t.je_durchf ?? "", t.quote == null ? "" : Math.round(t.quote * 100), t.abgesagt];
+      };
 
       const multi = clusters.filter((c) => c.size > 1);
-      const clusterRows = [["Cluster-Nr.", "Clustername", "Anzahl Module", "Ähnlichkeitsstufe", "Ähnlicher als … % aller Modulpaare",
+      const tnCell = (v) => (v == null ? "" : Math.round(v));
+      const clusterRows = [["Cluster-Nr.", "Clustername", "Anzahl Module", ...(TN ? ["Teilnehmende pro Jahr (Summe)"] : []), "Ähnlichkeitsstufe", "Ähnlicher als … % aller Modulpaare",
         "Gemeinsame Themen", "Studiengänge", "Modulnummern", "Module", "Gemeinsame Literatur", "Bewertung", "Kommentar"]];
       for (const c of multi) {
-        clusterRows.push([c.nr, c.label, c.size, levelTxt(c), Math.round(Math.min(99.9, c.pct) * 10) / 10,
+        clusterRows.push([c.nr, c.label, c.size, ...(TN ? [tnCell(tnSum(c.members))] : []), levelTxt(c), Math.round(Math.min(99.9, c.pct) * 10) / 10,
           c.terms.map(([t]) => t).join(", "),
           sgMix(c.members),
           c.members.map((i) => M[i].id).join(", "),
@@ -802,11 +854,13 @@
       }
 
       const moduleRows = [["Cluster-Nr.", "Clustername", "Module im Cluster", "Ähnlichkeitsstufe", "Modulnummer", "Modulname",
-        "Modulname (englisch)", "Studiengang (Kürzel)", "Studiengang", "ECTS", "Ähnlichstes Modul im Cluster", "Ähnlichstes Modul insgesamt", "Bewertung", "Kommentar"]];
+        "Modulname (englisch)", "Studiengang (Kürzel)", "Studiengang", "ECTS",
+        ...(TN ? ["Teilnehmende pro Jahr (Ø)", ...TN.meta.studienjahre.map((y) => `Teilnehmende ${y}`), "Durchführungen", "Ø je Durchführung", "Auslastung (%)", "Absagen"] : []),
+        "Ähnlichstes Modul im Cluster", "Ähnlichstes Modul insgesamt", "Bewertung", "Kommentar"]];
       for (const c of clusters) {
         for (const i of c.members) {
           moduleRows.push([c.nr, c.size > 1 ? c.label : "Einzelmodul", c.size, levelTxt(c), M[i].id, M[i].name, M[i].name_en || "",
-            M[i].sg, sgName(i), M[i].ects ?? "", c.size > 1 ? nearestIn(i, c.members) : "", nearestIn(i, all), "", ""]);
+            M[i].sg, sgName(i), M[i].ects ?? "", ...tnCols(i), c.size > 1 ? nearestIn(i, c.members) : "", nearestIn(i, all), "", ""]);
         }
       }
 
@@ -826,14 +880,15 @@
         ["Cluster-Nummern gelten nur für diese Einstellung. Bei anderer Clusteranzahl oder Größengrenze ändert sich die Clusterung."],
         ["Ähnlichkeitsstufe: mittlere Ähnlichkeit der Module eines Clusters, eingeordnet gegenüber allen Modulpaaren (sehr hoch = oberes 1 %, hoch = obere 4 %, mittel = obere 10 %)."],
         [`Standardgewichtung: ${weightsText(DEFAULT_W)}. Andere Gewichtungen ergeben eine andere Clusterung.`],
+        ...(TN ? [[`Teilnehmende: ${TN_YEARS.replace("Ø", "Durchschnitt pro Studienjahr")} (WiSe + SoSe), alle Durchführungen eines Moduls addiert, Absagen = 0. Quelle: ${TN.meta.quelle}. Cluster: Summe über die Module.`]] : []),
         [`Studiengänge: ${Object.entries(SG).map(([k, v]) => `${k} = ${v}`).join("; ")}`],
         [`Nicht enthalten (Rahmenmodule): ${data.meta.excluded.join(", ")}`],
         ["Die Spalten „Bewertung“ und „Kommentar“ sind frei auszufüllen."],
       ];
 
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, sheet(XLSX, clusterRows, [10, 40, 12, 16, 16, 40, 24, 30, 70, 50, 18, 40]), "Cluster");
-      XLSX.utils.book_append_sheet(wb, sheet(XLSX, moduleRows, [10, 36, 12, 16, 12, 50, 44, 10, 36, 6, 50, 50, 18, 40]), "Module");
+      XLSX.utils.book_append_sheet(wb, sheet(XLSX, clusterRows, [10, 40, 12, ...(TN ? [14] : []), 16, 16, 40, 24, 30, 70, 50, 18, 40]), "Cluster");
+      XLSX.utils.book_append_sheet(wb, sheet(XLSX, moduleRows, [10, 36, 12, 16, 12, 50, 44, 10, 36, 6, ...(TN ? [14, ...TN.meta.studienjahre.map(() => 12), 12, 12, 12, 10] : []), 50, 50, 18, 40]), "Module");
       const info = XLSX.utils.aoa_to_sheet(infoRows);
       info["!cols"] = [{ wch: 30 }, { wch: 90 }];
       XLSX.utils.book_append_sheet(wb, info, "Hinweise");
@@ -863,6 +918,6 @@
   renderLegend();
 
   let rT;
-  addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(() => { sizeMap(); positionMap(); if (state.view === "matrix") drawMatrix(); }, 120); });
+  addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(() => { sizeMap(); gPts.selectAll("circle").attr("r", (d, i) => radius(i)); positionMap(); if (state.view === "matrix") drawMatrix(); }, 120); });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawMap(); renderLegend(); renderDetail(); if (state.view === "matrix") drawMatrix(); });
 })();
