@@ -39,3 +39,20 @@ cd web && python3 -m http.server 8765   # http://localhost:8765
 Das `Dockerfile` im Projektwurzelverzeichnis baut einen nginx-Container mit der statischen Website (Port 80,
 Healthcheck unter `/healthz`). In Sliplane einen Service aus dem Git-Repository mit diesem Dockerfile anlegen.
 Nach Datenänderungen die Pipeline neu laufen lassen, `web/data/data.json` committen und neu deployen.
+
+### Passwortschutz
+
+Die ganze Seite ist per HTTP-Basic-Auth geschützt (nur `/healthz` ist offen). Zugangsdaten kommen aus
+Umgebungsvariablen des Sliplane-Service:
+
+| Variable              | Pflicht | Bedeutung                                     |
+|-----------------------|---------|-----------------------------------------------|
+| `BASIC_AUTH_PASSWORD` | ja      | Passwort (am besten als Secret hinterlegen)   |
+| `BASIC_AUTH_USER`     | nein    | Benutzername, Standard `modullandschaft`      |
+
+Beim Start erzeugt `deploy/40-basic-auth.sh` daraus einen gesalzenen SHA-512-Hash für nginx. Fehlt das
+Passwort, startet der Container bewusst nicht, damit die Seite nie versehentlich offen ist. Passwort ändern:
+Variable in Sliplane anpassen und neu deployen.
+
+Lokal testen: `podman build -t modullandschaft . && podman run --rm -p 8080:80 -e BASIC_AUTH_PASSWORD=test modullandschaft`
+(Docker genauso).
