@@ -1,13 +1,14 @@
-/* Modullandschaft – Clusterung live im Browser aus vorab berechneter Zusammenlegungsfolge. */
+/* Modullandschaft – Clusterung live im Browser aus vorab berechneter Zusammenlegungsfolge.
+   Bei eigener Gewichtung werden Gesamtwert und Zusammenlegungsfolge im Browser neu berechnet. */
 (async function () {
   "use strict";
 
   const data = await (await fetch("data/data.json")).json();
   const N = data.meta.n;
   const M = data.modules;
-  const SIM = data.sim;
+  let SIM = data.sim;     // Gesamtwert zur aktuellen Gewichtung
   const DIMS = data.dims;
-  const Q = data.meta.quantiles;
+  let Q = data.meta.quantiles;
   const SG = data.meta.studiengaenge;   // Kürzel → Name des Studiengangs
 
   const LEVELS = [
@@ -17,7 +18,13 @@
     { min: -1, label: "gering", var: "--lvl-1" },
   ];
 
-  const state = { cap: "5", k: 90, view: "map", sel: null, hover: null, fixed: false };
+  // Dimensionen und Standardgewichte (in %); merges/orders/sim/quantiles in data.json gelten für diese
+  const DIM_KEYS = ["inhalte", "kompetenzen", "literatur"];
+  const DIM_LABEL = { inhalte: "Inhalte", kompetenzen: "Kompetenzen", literatur: "Literatur" };
+  const DEFAULT_W = Object.fromEntries(DIM_KEYS.map((d) => [d, Math.round(data.meta.weights[d] * 100)]));
+
+  // w: Reglerwerte 0–100 je Dimension, wirksam ist ihr Anteil an der Summe
+  const state = { cap: "5", k: 90, view: "map", sel: null, hover: null, fixed: false, w: { ...DEFAULT_W } };
   let clusters = [];      // aktive Cluster
   let clusterOf = [];     // Modulindex → Cluster
   let transform = d3.zoomIdentity;
@@ -32,6 +39,9 @@
   // Q: Quantile aller Paarwerte in gleichmäßigen Schritten (z. B. 1001 Werte = 0,1-%-Stufen)
   function percentile(z) {
     const last = Q.length - 1, step = 100 / last;
+    // Bei Gleichstand (z. B. viele Paare ohne gemeinsame Literatur) zählt die Mitte des Bereichs
+    const a = d3.bisectLeft(Q, z), b = d3.bisectRight(Q, z);
+    if (b - a > 1) return ((a + b - 1) / 2) * step;
     if (z <= Q[0]) return 0;
     if (z >= Q[last]) return 100;
     let lo = 0, hi = last;
@@ -55,10 +65,107 @@
     return n.map(([sg, k]) => (k > 1 ? `${sg} (${k})` : sg)).join(", ");
   }
 
+  // ---------------------------------------------------------------- Gewichtung
+
+  const share = (w, d) => w[d] / DIM_KEYS.reduce((s, k) => s + w[k], 0);
+  const isDefaultW = (w) => DIM_KEYS.every((d) => Math.abs(share(w, d) - share(DEFAULT_W, d)) < 1e-9);
+  const weightsText = (w) => DIM_KEYS.map((d) => `${DIM_LABEL[d]} ${Math.round(share(w, d) * 100)} %`).join(", ");
+
+  // Gesamtwert, Quantile, Zusammenlegungsfolge und Matrixreihenfolge zur aktuellen Gewichtung
+  let struct;
+  function buildStructure() {
+    if (isDefaultW(state.w)) {
+      // Vorab berechnet – so bleiben Links und Exporte mit Standardgewichtung exakt reproduzierbar
+      struct = { sim: data.sim, q: data.meta.quantiles, merges: (cap) => data.merges[cap], order: (cap) => data.orders[cap] };
+    } else {
+      const sim = combineDims(state.w);
+      const cache = new Map();
+      let base;
+      const get = (cap) => {
+        if (!cache.has(cap)) {
+          const merges = cappedAverageLinkage(sim, +cap);
+          base ??= leafOrder(cap === "0" ? merges : cappedAverageLinkage(sim, 0), d3.range(N));
+          cache.set(cap, { merges, order: leafOrder(merges, base) });
+        }
+        return cache.get(cap);
+      };
+      struct = { sim, q: quantiles(sim), merges: (cap) => get(cap).merges, order: (cap) => get(cap).order };
+    }
+    SIM = struct.sim;
+    Q = struct.q;
+  }
+
+  // Gewichtetes Mittel der Dimensionswerte wie similarity.combine: fehlt einem Modul die Literatur, zählen nur
+  // die übrigen Dimensionen. Bleibt keine übrig (nur Literatur gewichtet), gilt 0 – wie „nichts geteilt“.
+  function combineDims(w) {
+    const out = Array.from({ length: N }, () => new Array(N).fill(null));
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+      let num = 0, den = 0;
+      for (const d of DIM_KEYS) {
+        const v = DIMS[d][i][j];
+        if (v != null && w[d] > 0) { num += w[d] * v; den += w[d]; }
+      }
+      out[i][j] = out[j][i] = den > 0 ? num / den : 0;
+    }
+    return out;
+  }
+
+  function quantiles(sim) {
+    const v = [];
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) v.push(sim[i][j]);
+    v.sort((a, b) => a - b);
+    return d3.range(1001).map((k) => d3.quantileSorted(v, k / 1000));
+  }
+
+  // Wie export_web.capped_average_linkage: Rückgabe [a, b, ähnlichkeit] mit Cluster-IDs im SciPy-Schema
+  function cappedAverageLinkage(sim, cap) {
+    const S = 2 * N;
+    const total = new Float64Array(S * S);   // Summen der paarweisen Ähnlichkeiten zwischen Clustern
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) total[i * S + j] = i === j ? 0 : sim[i][j] ?? -Infinity;
+    const sizes = new Int32Array(S).fill(1, 0, N);
+    let active = d3.range(N), next = N;
+    const merges = [];
+    while (active.length > 1) {
+      let best = -Infinity, ba = -1, bb = -1;
+      for (let x = 0; x < active.length; x++) {
+        const a = active[x];
+        for (let y = x + 1; y < active.length; y++) {
+          const b = active[y];
+          if (cap && sizes[a] + sizes[b] > cap) continue;
+          const avg = total[a * S + b] / (sizes[a] * sizes[b]);
+          if (avg > best) { best = avg; ba = a; bb = b; }
+        }
+      }
+      if (ba < 0) break;
+      const c = next++;
+      sizes[c] = sizes[ba] + sizes[bb];
+      active = active.filter((x) => x !== ba && x !== bb);
+      for (const x of active) total[x * S + c] = total[c * S + x] = total[ba * S + x] + total[bb * S + x];
+      active.push(c);
+      merges.push([ba, bb, Math.round(best * 1000) / 1000]);
+    }
+    return merges;
+  }
+
+  // Wie export_web.leaf_order: Blattreihenfolge des Merge-Walds, Wurzeln nach Position in `base`
+  function leafOrder(merges, base) {
+    const rank = new Map(base.map((leaf, r) => [leaf, r]));
+    const merged = new Set(merges.flatMap(([a, b]) => [a, b]));
+    const leaves = (c) => {
+      if (c < N) return [c];
+      const [a, b] = merges[c - N];
+      const la = leaves(a), lb = leaves(b);
+      return d3.min(la, (x) => rank.get(x)) <= d3.min(lb, (x) => rank.get(x)) ? la.concat(lb) : lb.concat(la);
+    };
+    const roots = d3.range(N + merges.length).filter((c) => !merged.has(c)).map(leaves);
+    roots.sort((p, q) => rank.get(p[0]) - rank.get(q[0]));
+    return roots.flat();
+  }
+
   // ---------------------------------------------------------------- Clusterung
 
   function computeClusters() {
-    const merges = data.merges[state.cap];
+    const merges = struct.merges(state.cap);
     const steps = Math.min(N - state.k, merges.length);
     const members = new Map();
     for (let i = 0; i < N; i++) members.set(i, [i]);
@@ -267,7 +374,7 @@
   let mGeom = null;
 
   function drawMatrix() {
-    const order = data.orders[state.cap];
+    const order = struct.order(state.cap);
     const wrap = canvas.parentElement;
     const size = Math.floor(Math.min(wrap.clientWidth, wrap.clientHeight || wrap.clientWidth));
     const dpr = window.devicePixelRatio || 1;
@@ -535,6 +642,15 @@
     slider.addEventListener("input", () => { state.k = +slider.value; update(false); });
     document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setView(t.dataset.view)));
     $("module-list").innerHTML = M.map((m) => `<option value="${esc(m.name)} · ${m.id}" label="${esc(m.name)} · ${m.id} · ${esc(SG[m.sg] || m.sg)}">`).join("");
+    $("w-group").innerHTML = DIM_KEYS.map((d) => `<label class="w-row"><span>${DIM_LABEL[d]}</span>
+      <input type="range" min="0" max="100" step="5" data-dim="${d}" aria-label="Gewicht ${DIM_LABEL[d]}"><output id="w-${d}"></output></label>`).join("");
+    $("w-group").querySelectorAll("input").forEach((el) => el.addEventListener("input", () => {
+      state.w[el.dataset.dim] = +el.value;
+      // Mindestens eine Dimension muss zählen
+      if (DIM_KEYS.every((d) => state.w[d] === 0)) state.w[el.dataset.dim] = +el.step;
+      applyWeights();
+    }));
+    $("w-reset").addEventListener("click", () => { state.w = { ...DEFAULT_W }; applyWeights(); });
     $("search").addEventListener("change", (ev) => {
       const v = ev.target.value.toLowerCase();
       const i = M.findIndex((m) => `${m.name} · ${m.id}`.toLowerCase() === v || m.id.toLowerCase() === v || m.name.toLowerCase() === v);
@@ -543,8 +659,28 @@
     });
   }
 
+  function renderWeights() {
+    for (const d of DIM_KEYS) {
+      $("w-group").querySelector(`[data-dim="${d}"]`).value = state.w[d];
+      $(`w-${d}`).textContent = `${Math.round(share(state.w, d) * 100)} %`;
+    }
+    const def = isDefaultW(state.w);
+    $("w-reset").hidden = def;
+    $("w-hint").textContent = def ? "Standardgewichtung" : "Eigene Gewichtung – Cluster neu berechnet.";
+    $("w-fixed").textContent = weightsText(state.w);
+    $("footer").textContent = `${N} Module ausgewertet · ${data.meta.excluded.length} Rahmenmodule ausgeblendet · Gewichtung: ${weightsText(state.w)}`;
+  }
+
+  function applyWeights() {
+    buildStructure();
+    renderWeights();
+    updateSliderRange();
+    update(false);
+    if (state.view === "matrix") drawMatrix();
+  }
+
   function updateSliderRange() {
-    const minK = N - data.merges[state.cap].length;
+    const minK = N - struct.merges(state.cap).length;
     slider.min = minK; slider.max = N;
     state.k = Math.max(minK, Math.min(N, state.k));
     slider.value = state.k;
@@ -579,7 +715,8 @@
   }
 
   function hashFor(fixed) {
-    return `k=${state.k}&max=${state.cap}${fixed ? "&ansicht=fest" : ""}`;
+    const w = isDefaultW(state.w) ? "" : `&gewichte=${DIM_KEYS.map((d) => state.w[d]).join("-")}`;
+    return `k=${state.k}&max=${state.cap}${w}${fixed ? "&ansicht=fest" : ""}`;
   }
 
   function readHash() {
@@ -587,6 +724,11 @@
     state.fixed = p.get("ansicht") === "fest";
     if (p.has("max") && data.meta.caps.map(String).includes(p.get("max"))) state.cap = p.get("max");
     if (p.has("k")) state.k = +p.get("k") || state.k;
+    // gewichte=Inhalte-Kompetenzen-Literatur, z. B. 60-20-20
+    const w = (p.get("gewichte") || "").split("-").map(Number);
+    if (w.length === 3 && w.every((v) => Number.isInteger(v) && v >= 0 && v <= 100) && w.some((v) => v > 0)) {
+      DIM_KEYS.forEach((d, i) => { state.w[d] = w[i]; });
+    }
   }
 
   // ---------------------------------------------------------------- Link teilen & Excel-Export
@@ -675,6 +817,7 @@
         ["Stand", today.toLocaleDateString("de-DE")],
         ["Anzahl Cluster", state.k],
         ["Max. Module je Cluster", capTxt],
+        ["Gewichtung", weightsText(state.w) + (isDefaultW(state.w) ? " (Standard)" : "")],
         ["Cluster mit mehreren Modulen", multi.length],
         ["Module ausgewertet", N],
         ["Link zu diesem Stand", fixedLink()],
@@ -682,7 +825,7 @@
         ["Hinweise"],
         ["Cluster-Nummern gelten nur für diese Einstellung. Bei anderer Clusteranzahl oder Größengrenze ändert sich die Clusterung."],
         ["Ähnlichkeitsstufe: mittlere Ähnlichkeit der Module eines Clusters, eingeordnet gegenüber allen Modulpaaren (sehr hoch = oberes 1 %, hoch = obere 4 %, mittel = obere 10 %)."],
-        ["Gewichtung: Inhalte 45 %, Kompetenzen 35 %, Literatur 20 %."],
+        [`Standardgewichtung: ${weightsText(DEFAULT_W)}. Andere Gewichtungen ergeben eine andere Clusterung.`],
         [`Studiengänge: ${Object.entries(SG).map(([k, v]) => `${k} = ${v}`).join("; ")}`],
         [`Nicht enthalten (Rahmenmodule): ${data.meta.excluded.join(", ")}`],
         ["Die Spalten „Bewertung“ und „Kommentar“ sind frei auszufüllen."],
@@ -696,7 +839,8 @@
       XLSX.utils.book_append_sheet(wb, info, "Hinweise");
 
       const stamp = today.toISOString().slice(0, 10);
-      XLSX.writeFile(wb, `Modullandschaft_${state.k}-Cluster_max-${state.cap === "0" ? "ohne" : state.cap}_${stamp}.xlsx`);
+      const wTxt = isDefaultW(state.w) ? "" : `_Gewichte-${DIM_KEYS.map((d) => state.w[d]).join("-")}`;
+      XLSX.writeFile(wb, `Modullandschaft_${state.k}-Cluster_max-${state.cap === "0" ? "ohne" : state.cap}${wTxt}_${stamp}.xlsx`);
     } catch (err) {
       alert("Export fehlgeschlagen: " + err.message);
     } finally {
@@ -711,11 +855,12 @@
   $("cap-value").textContent = state.cap === "0" ? "∞" : state.cap;
   setupControls();
   setupActions();
+  buildStructure();
+  renderWeights();
   updateSliderRange();
   sizeMap();
   update(true);
   renderLegend();
-  $("footer").textContent = `${N} Module ausgewertet · ${data.meta.excluded.length} Rahmenmodule ausgeblendet · Gewichtung: Inhalte 45 %, Kompetenzen 35 %, Literatur 20 %`;
 
   let rT;
   addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(() => { sizeMap(); positionMap(); if (state.view === "matrix") drawMatrix(); }, 120); });

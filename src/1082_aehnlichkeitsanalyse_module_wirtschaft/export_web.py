@@ -7,7 +7,9 @@ Vorab berechnet (die Website rechnet nichts Schweres selbst):
 - Blattreihenfolge je Größengrenze für die Matrixansicht (jedes Cluster ist darin zusammenhängend).
 - 2D-Karte per UMAP auf dem Abstand `1 − Perzentil(Gesamtähnlichkeit)`.
 - Je Modul die gewichteten Fachbegriffe (TF-IDF) zur Benennung von Clustern.
-- Begründungen (ähnlichste Stichpunkte, geteilte Literatur) für alle hinreichend ähnlichen Paare.
+- Begründungen (ähnlichste Stichpunkte, geteilte Literatur) für alle hinreichend ähnlichen Paare – auch für
+  Paare, die erst bei anderer Gewichtung ähnlich werden (die Website lässt die Gewichte einstellen und
+  berechnet Gesamtwert und Clusterung dann selbst aus den Dimensionswerten).
 
 Modulverantwortliche werden bewusst nicht exportiert.
 """
@@ -21,7 +23,7 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from .similarity import STOPWORDS_DE
+from .similarity import STOPWORDS_DE, WEIGHTS
 
 ROOT = Path(__file__).resolve().parents[2]
 PREP_DIR = ROOT / "data" / "aufbereitet"
@@ -55,7 +57,8 @@ STUDIENGAENGE = {
 STUDIENGANG_SONST = ("ÜG", "Studiengangsübergreifend")
 
 CAPS = [3, 4, 5, 6, 8, 0]  # 0 = ohne Grenze
-EVIDENCE_MIN_Z = 1.0
+EVIDENCE_MIN_Z = 1.0      # Gesamtwert bei Standardgewichtung
+EVIDENCE_MIN_DIM_Z = 1.5  # Inhalte oder Kompetenzen allein (für andere Gewichtungen)
 TOP_TERMS = 25
 MAX_POINTS = 14
 
@@ -257,7 +260,9 @@ def export() -> dict:
     pairs = pd.read_csv(SIM_DIR / "paare.csv", dtype={"modul_a": str, "modul_b": str})
     pairs = pairs[pairs["modul_a"].isin(pos) & pairs["modul_b"].isin(pos)]
     evidence = {}
-    for _, r in pairs[pairs["gesamt_z"] >= EVIDENCE_MIN_Z].iterrows():
+    relevant = ((pairs["gesamt_z"] >= EVIDENCE_MIN_Z) | (pairs["inhalte_z"] >= EVIDENCE_MIN_DIM_Z)
+                | (pairs["kompetenzen_z"] >= EVIDENCE_MIN_DIM_Z) | (pairs["anzahl_gemeinsame_literatur"] > 0))
+    for _, r in pairs[relevant].iterrows():
         a, b = pos[r["modul_a"]], pos[r["modul_b"]]
         key = f"{min(a, b)}-{max(a, b)}"
         swap = a > b
@@ -277,7 +282,7 @@ def export() -> dict:
             "excluded": sorted(RAHMENMODULE),
             "caps": CAPS,
             "studiengaenge": dict(sorted(set(STUDIENGAENGE.values()) | {STUDIENGANG_SONST})),
-            "weights": {"inhalte": 0.45, "kompetenzen": 0.35, "literatur": 0.20},
+            "weights": WEIGHTS,  # Standard; merges/orders/sim/quantiles gelten für diese Gewichtung
             # Verteilung aller Paarwerte → Einordnung „gehört zu den ähnlichsten x %“
             "quantiles": [round(float(q), 3) for q in np.quantile(total[iu], np.linspace(0, 1, 1001))],
         },

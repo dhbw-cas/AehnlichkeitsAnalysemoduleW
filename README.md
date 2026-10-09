@@ -24,6 +24,11 @@ cd web && python3 -m http.server 8765   # http://localhost:8765
 ## Links und Export
 
 - Einstellungen stehen im Link: `#k=90&max=5` (90 Cluster, höchstens 5 Module je Cluster).
+- Gewichtung: Anwender können Inhalte, Kompetenzen und Literatur im Bereich „Einstellungen“ selbst gewichten.
+  Eine abweichende Gewichtung steht als `&gewichte=60-20-20` (Inhalte-Kompetenzen-Literatur) im Link; die
+  Website berechnet Gesamtwert und Clusterung dann im Browser neu (gleicher Algorithmus wie `export_web.py`).
+  Die Karte behält ihre Anordnung aus der Standardgewichtung (`WEIGHTS`). Ohne `gewichte` gelten die
+  vorab berechneten Werte – bestehende Links bleiben unverändert.
 - Feste Ansicht ohne Regler, z. B. für Arbeitsgruppen: `#k=90&max=5&ansicht=fest`
   (Button „Link zur festen Ansicht“). Das blendet die Regler nur aus und ist kein Zugriffsschutz.
 - „Excel-Export“ lädt den aktuellen Stand als `.xlsx` (Blätter Cluster, Module, Hinweise) mit leeren
