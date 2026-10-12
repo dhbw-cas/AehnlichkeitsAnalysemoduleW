@@ -1,6 +1,6 @@
 # Statische Website „Modullandschaft“ – alle Berechnungen sind vorab in web/data/data.json exportiert.
 FROM nginx:1.27-alpine
-# openssl erzeugt beim Start den Passwort-Hash (deploy/40-basic-auth.sh)
+# openssl erzeugt beim Start den Passwort-Hash (deploy/40-basic-auth.sh) - Test
 RUN apk add --no-cache openssl
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY deploy/40-basic-auth.sh /docker-entrypoint.d/40-basic-auth.sh
