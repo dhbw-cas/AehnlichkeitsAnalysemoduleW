@@ -38,8 +38,11 @@ cd web && python3 -m http.server 8765   # http://localhost:8765
   vorab berechneten Werte – bestehende Links bleiben unverändert.
 - Feste Ansicht ohne Regler, z. B. für Arbeitsgruppen: `#k=90&max=5&ansicht=fest`
   (Button „Link zur festen Ansicht“). Das blendet die Regler nur aus und ist kein Zugriffsschutz.
-- „Excel-Export“ lädt den aktuellen Stand als `.xlsx` (Blätter Cluster, Module, Hinweise) mit leeren
-  Spalten „Bewertung“ und „Kommentar“. Cluster-Nummern gelten nur für die jeweilige Einstellung.
+- „Excel-Export“ lädt den aktuellen Stand als `.xlsx` nach der Vorlage `data/Template Ähnlichkeitsanalyse Module W …xlsx`:
+  ein Blatt „Cluster“, eine Zeile je Cluster mit mehreren Modulen, die Module nebeneinander (Nummer, Name,
+  Modulverantwortung, Lerneinheiten und Inhalte, Literatur, Teilnehmende/Jahr). Die Modulplätze wachsen mit der größten
+  Clustergröße (mindestens 3). „Lead WL“ sowie die Spalten ab „Status“ bleiben zum Ausfüllen leer.
+  Cluster-Nummern gelten nur für die jeweilige Einstellung.
 
 ## Deployment (Sliplane)
 

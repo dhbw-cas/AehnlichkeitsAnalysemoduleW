@@ -823,77 +823,33 @@
     btn.disabled = true;
     try {
       const XLSX = await loadXlsx();
-      const capTxt = state.cap === "0" ? "ohne Grenze" : state.cap;
-      const levelTxt = (c) => (c.size > 1 ? c.level.label : "–");
-      const nearestIn = (i, pool) => {
-        const cand = pool.filter((j) => j !== i);
-        if (!cand.length) return "";
-        const j = cand.reduce((a, b) => (SIM[i][b] > SIM[i][a] ? b : a));
-        return `${M[j].name} (${M[j].id}, ${M[j].sg}, ${topShare(percentile(SIM[i][j]))})`;
-      };
-      const all = d3.range(N);
-      const tnCols = (i) => {
-        if (!TN) return [];
-        const t = tnOf(i);
-        if (!t) return ["", ...TN.meta.studienjahre.map(() => ""), "", "", "", ""];
-        return [tnCell(t.jahr), ...t.jahre, t.durchf, t.je_durchf ?? "", t.quote == null ? "" : Math.round(t.quote * 100), t.abgesagt];
-      };
-
-      const multi = clusters.filter((c) => c.size > 1);
+      // Vorlage „Ähnlichkeitsanalyse Module W“: ein Blatt, eine Zeile je Cluster, Module nebeneinander
       const tnCell = (v) => (v == null ? "" : Math.round(v));
-      const clusterRows = [["Cluster-Nr.", "Clustername", "Anzahl Module", ...(TN ? ["Teilnehmende pro Jahr (Summe)"] : []), "Ähnlichkeitsstufe", "Ähnlicher als … % aller Modulpaare",
-        "Gemeinsame Themen", "Studiengänge", "Modulnummern", "Module", "Gemeinsame Literatur", "Bewertung", "Kommentar"]];
+      const multi = clusters.filter((c) => c.size > 1);
+      const slots = Math.max(3, ...multi.map((c) => c.size));
+      const modHead = ["Nummer", "Name", "Modulverantwortung", "Lerneinheiten und Inhalte", "Literatur", "durchschnittliche Teilnehmende/Jahr "];
+      const head = ["Cluster-Nr.", "Clustername", "Lead WL", "Anzahl Module", "Gemeinsame Themen", "Gemeinsame Literatur", "Studiengänge",
+        ...d3.range(1, slots + 1).flatMap((n) => modHead.map((h) => `Modul ${n}: ${h}`)),
+        "Status (offen / in Abstimmung / abgeschlossen)",
+        "Entscheidung (\"Bestehendes Modul weiterführen\" oder \"Neues gemeinsames Modul entwickeln\")",
+        "Zielmodul – Nr. (bestehende Modulnummer oder \"NEU\")", "Zielmodul – Name", "Zielmodul – Modulverantwortung",
+        "Zu streichende Module", "Studiengangsverortung", "Kommentar"];
+      const rows = [head];
       for (const c of multi) {
-        clusterRows.push([c.nr, c.label, c.size, ...(TN ? [tnCell(tnSum(c.members))] : []), levelTxt(c), Math.round(Math.min(99.9, c.pct) * 10) / 10,
+        const cells = c.members.flatMap((i) => [M[i].id, `${M[i].name} (${M[i].sg})`, M[i].resp || "", M[i].lehr || "",
+          M[i].lit.map(([, l]) => l).join("; "), tnOf(i) ? tnCell(tnOf(i).jahr) : ""]);
+        cells.length = slots * modHead.length; // fehlende Modulplätze leer lassen
+        rows.push([c.nr, c.label, "", c.size,
           c.terms.map(([t]) => t).join(", "),
-          sgMix(c.members),
-          c.members.map((i) => M[i].id).join(", "),
-          c.members.map((i) => `${M[i].name} (${M[i].sg})`).join("; "),
           sharedLiterature(c.members).map((x) => `${x.label} (${x.n})`).join("; "),
-          "", ""]);
+          sgMix(c.members), ...Array.from(cells, (v) => v ?? ""), "", "", "", "", "", "", "", ""]);
       }
-
-      const moduleRows = [["Cluster-Nr.", "Clustername", "Module im Cluster", "Ähnlichkeitsstufe", "Modulnummer", "Modulname",
-        "Modulname (englisch)", "Studiengang (Kürzel)", "Studiengang", "ECTS",
-        ...(TN ? ["Teilnehmende pro Jahr (Ø)", ...TN.meta.studienjahre.map((y) => `Teilnehmende ${y}`), "Durchführungen", "Ø je Durchführung", "Auslastung (%)", "Absagen"] : []),
-        "Ähnlichstes Modul im Cluster", "Ähnlichstes Modul insgesamt", "Bewertung", "Kommentar"]];
-      for (const c of clusters) {
-        for (const i of c.members) {
-          moduleRows.push([c.nr, c.size > 1 ? c.label : "Einzelmodul", c.size, levelTxt(c), M[i].id, M[i].name, M[i].name_en || "",
-            M[i].sg, sgName(i), M[i].ects ?? "", ...tnCols(i), c.size > 1 ? nearestIn(i, c.members) : "", nearestIn(i, all), "", ""]);
-        }
-      }
-
-      const today = new Date();
-      const infoRows = [
-        ["Modullandschaft – Export"],
-        [],
-        ["Stand", today.toLocaleDateString("de-DE")],
-        ["Anzahl Cluster", state.k],
-        ["Max. Module je Cluster", capTxt],
-        ["Gewichtung", weightsText(state.w) + (isDefaultW(state.w) ? " (Standard)" : "")],
-        ["Cluster mit mehreren Modulen", multi.length],
-        ["Module ausgewertet", N],
-        ["Link zu diesem Stand", fixedLink()],
-        [],
-        ["Hinweise"],
-        ["Cluster-Nummern gelten nur für diese Einstellung. Bei anderer Clusteranzahl oder Größengrenze ändert sich die Clusterung."],
-        ["Ähnlichkeitsstufe: mittlere Ähnlichkeit der Module eines Clusters, eingeordnet gegenüber allen Modulpaaren (sehr hoch = oberes 1 %, hoch = obere 4 %, mittel = obere 10 %)."],
-        [`Standardgewichtung: ${weightsText(DEFAULT_W)}. Andere Gewichtungen ergeben eine andere Clusterung.`],
-        ...(TN ? [[`Teilnehmende: ${TN_YEARS.replace("Ø", "Durchschnitt pro Studienjahr")} (WiSe + SoSe), alle Durchführungen eines Moduls addiert, Absagen = 0. Quelle: ${TN.meta.quelle}. Cluster: Summe über die Module.`]] : []),
-        [`Studiengänge: ${Object.entries(SG).map(([k, v]) => `${k} = ${v}`).join("; ")}`],
-        [`Nicht enthalten (Rahmenmodule): ${data.meta.excluded.join(", ")}`],
-        ["Die Spalten „Bewertung“ und „Kommentar“ sind frei auszufüllen."],
-      ];
-
+      const widths = [11, 50, 10, 10, 60, 60, 20,
+        ...d3.range(slots).flatMap(() => [12, 40, 28, 60, 50, 14]), 24, 40, 28, 30, 30, 28, 20, 30];
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, sheet(XLSX, clusterRows, [10, 40, 12, ...(TN ? [14] : []), 16, 16, 40, 24, 30, 70, 50, 18, 40]), "Cluster");
-      XLSX.utils.book_append_sheet(wb, sheet(XLSX, moduleRows, [10, 36, 12, 16, 12, 50, 44, 10, 36, 6, ...(TN ? [14, ...TN.meta.studienjahre.map(() => 12), 12, 12, 12, 10] : []), 50, 50, 18, 40]), "Module");
-      const info = XLSX.utils.aoa_to_sheet(infoRows);
-      info["!cols"] = [{ wch: 30 }, { wch: 90 }];
-      XLSX.utils.book_append_sheet(wb, info, "Hinweise");
+      XLSX.utils.book_append_sheet(wb, sheet(XLSX, rows, widths), "Cluster");
 
-      const stamp = today.toISOString().slice(0, 10);
+      const stamp = new Date().toISOString().slice(0, 10);
       const wTxt = isDefaultW(state.w) ? "" : `_Gewichte-${DIM_KEYS.map((d) => state.w[d]).join("-")}`;
       XLSX.writeFile(wb, `Modullandschaft_${state.k}-Cluster_max-${state.cap === "0" ? "ohne" : state.cap}${wTxt}_${stamp}.xlsx`);
     } catch (err) {

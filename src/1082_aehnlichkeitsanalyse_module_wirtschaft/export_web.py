@@ -11,7 +11,7 @@ Vorab berechnet (die Website rechnet nichts Schweres selbst):
   Paare, die erst bei anderer Gewichtung ähnlich werden (die Website lässt die Gewichte einstellen und
   berechnet Gesamtwert und Clusterung dann selbst aus den Dimensionswerten).
 
-Modulverantwortliche werden bewusst nicht exportiert.
+Modulverantwortliche stehen nur für den Excel-Export (Vorlage „Ähnlichkeitsanalyse Module W“) in den Daten.
 """
 
 import json
@@ -240,6 +240,9 @@ def export() -> dict:
         pts = points[points["modulnummer"] == r["modulnummer"]]
         heads = [h for h in pts["zwischenueberschrift"].dropna().unique().tolist() if str(h).strip()]
         items = pts["stichpunkt"].tolist()
+        lehr = []  # Lerneinheiten mit ihren Inhalten als Text für den Excel-Export
+        for head, grp in pts.groupby("zwischenueberschrift", sort=False, dropna=False):
+            lehr.append("\n".join([str(head)] * (not pd.isna(head)) + [f"• {t}" for t in grp["stichpunkt"]]))
         lit_rows = lit[(lit["modulnummer"] == r["modulnummer"]) & lit["lit_key"].notna()]
         mod_out.append({
             "id": r["modulnummer"],
@@ -247,6 +250,8 @@ def export() -> dict:
             "name_en": r["modulname_en"],
             "sg": studiengang(r["modulnummer"])[0],
             "ects": int(float(r["ects"])) if r["ects"] else None,
+            "resp": r["verantwortung"],
+            "lehr": "\n\n".join(lehr),
             "x": round(float(xy[i, 0]), 4),
             "y": round(float(xy[i, 1]), 4),
             "terms": terms[i],
